@@ -447,7 +447,7 @@ async function generateReport(caseMeta){
 
   /* ---------- overall authenticity assessment ---------- */
   {
-    if (!S.scores) computeScores();
+    if (!S.scores && typeof computeScores === 'function') computeScores();
     const sc = S.scores;
     if (sc){
       p = ensure(p, 240);
