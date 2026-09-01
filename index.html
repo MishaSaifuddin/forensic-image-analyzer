@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ForenScope · Forensic Image Analyzer</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a21; --panel2:#10141a; --border:#262d38;
+  --text:#d7dde6; --dim:#8a94a3; --accent:#35c4dc; --accent2:#1f8fa5;
+  --warn:#ffb454; --bad:#ff6b6b; --ok:#7dd97d;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:13px/1.45 "Segoe UI", system-ui, sans-serif;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.hidden{display:none!important}
+button{font:inherit; color:inherit; background:var(--panel); border:1px solid var(--border);
+  border-radius:6px; padding:5px 10px; cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent2)}
+button:disabled{opacity:.4; cursor:default}
+input[type=range]{width:100%; accent-color:var(--accent)}
+
+/* ---------- header ---------- */
+header{
+  display:flex; align-items:center; gap:14px; padding:0 14px; height:48px;
+  background:var(--panel); border-bottom:1px solid var(--border); flex:none;
+}
+.brand{font-weight:700; letter-spacing:.06em; font-size:15px; color:var(--accent); white-space:nowrap}
+.brand small{color:var(--dim); font-weight:400; letter-spacing:0; margin-left:8px}
+.hbtns{margin-left:auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.sep{width:1px; height:22px; background:var(--border); margin:0 4px}
+.zpct{min-width:56px; text-align:center; color:var(--dim); font-family:ui-monospace,Consolas,monospace}
+
+/* ---------- layout ---------- */
+#app{flex:1; display:flex; min-height:0}
+aside#left{width:238px; flex:none; overflow-y:auto; background:var(--panel2); border-right:1px solid var(--border); padding:10px}
+main#center{flex:1; display:flex; flex-direction:column; min-width:0}
+aside#right{width:330px; flex:none; overflow-y:auto; background:var(--panel2); border-left:1px solid var(--border); display:flex; flex-direction:column}
+
+/* ---------- tools sidebar ---------- */
+#tools{display:flex; flex-direction:column; gap:4px; margin-bottom:12px}
+.tool{text-align:left; padding:7px 10px; border-left:3px solid transparent}
+.tool span{display:block; color:var(--dim); font-size:11px}
+.tool.active{border-left-color:var(--accent); background:#1a212b}
+.params{padding-top:4px}
+.params label{display:block; margin:10px 0 2px; color:var(--dim)}
+.params output{float:right; color:var(--text); font-family:ui-monospace,Consolas,monospace}
+.seg{display:flex; flex-wrap:wrap; gap:4px}
+.seg button{flex:1; padding:4px 0; min-width:28px; font-family:ui-monospace,Consolas,monospace}
+.seg button.on{background:var(--accent); border-color:var(--accent); color:#04252c; font-weight:700}
+.chk{display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer}
+.hint{color:var(--dim); font-size:11.5px; margin:10px 0 0}
+.disclaimer{color:var(--dim); font-size:11px; border-top:1px solid var(--border); margin-top:16px; padding-top:10px}
+
+/* ---------- stage ---------- */
+#stage{
+  flex:1; min-height:0; overflow:auto; position:relative;
+  background:
+    conic-gradient(#141922 25%, #0f131a 0 50%, #141922 0 75%, #0f131a 0) 0 0/24px 24px;
+}
+#stageInner{
+  display:flex; align-items:center; justify-content:center;
+  width:max-content; height:max-content; min-width:100%; min-height:100%; padding:20px;
+}
+canvas.viewcv{
+  box-shadow:0 0 0 1px #000, 0 8px 30px rgba(0,0,0,.55);
+  image-rendering:pixelated; image-rendering:crisp-edges; cursor:crosshair;
+}
+#drop{
+  border:2px dashed var(--border); border-radius:12px; padding:60px 70px; text-align:center;
+  color:var(--dim); font-size:16px; user-select:none;
+}
+#drop small{display:block; margin-top:8px; font-size:12px}
+#mag{
+  position:absolute; right:14px; bottom:14px; width:176px; height:176px; border-radius:50%;
+  border:2px solid var(--accent); overflow:hidden; pointer-events:none;
+  box-shadow:0 6px 24px rgba(0,0,0,.6); z-index:5;
+}
+#status{
+  flex:none; height:26px; display:flex; align-items:center; gap:16px; padding:0 12px;
+  border-top:1px solid var(--border); background:var(--panel);
+  font:11.5px ui-monospace,Consolas,monospace; color:var(--dim); white-space:nowrap; overflow:hidden;
+}
+#status b{color:var(--text); font-weight:600}
+
+/* ---------- right panel ---------- */
+#tabs{display:flex; flex:none; border-bottom:1px solid var(--border)}
+#tabs button{flex:1; border:none; border-radius:0; background:transparent; padding:9px 4px; color:var(--dim)}
+#tabs button.on{color:var(--accent); box-shadow:inset 0 -2px 0 var(--accent)}
+.tab{padding:12px; overflow-y:auto; flex:1; min-height:0}
+.tab h3{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim);
+  margin:16px 0 6px; border-bottom:1px solid var(--border); padding-bottom:4px}
+.tab h3:first-child{margin-top:0}
+.kv{display:grid; grid-template-columns:minmax(110px,auto) 1fr; gap:3px 12px; font-size:12.5px}
+.kv .k{color:var(--dim)} .kv .v{word-break:break-word}
+.findings{list-style:none; margin:0; padding:0}
+.findings li{padding:6px 8px; border-radius:6px; margin-bottom:6px; font-size:12.5px; background:#12161d; border:1px solid var(--border)}
+.findings li::before{margin-right:6px}
+.findings .warn{border-color:#5a4419} .findings .warn::before{content:"⚠"; color:var(--warn)}
+.findings .info::before{content:"ℹ"; color:var(--accent)}
+.findings .ok::before{content:"✓"; color:var(--ok)}
+.findings .bad{border-color:#5a2323} .findings .bad::before{content:"✖"; color:var(--bad)}
+table.struct{width:100%; border-collapse:collapse; font:11px ui-monospace,Consolas,monospace}
+table.struct th{color:var(--dim); text-align:left; font-weight:400; padding:2px 6px}
+table.struct td{padding:2px 6px; border-top:1px solid #1b222c; white-space:nowrap}
+.dqtgrid{display:grid; grid-template-columns:repeat(8,1fr); gap:0 8px; font:10px ui-monospace,Consolas,monospace;
+  background:#0b0e13; border:1px solid var(--border); border-radius:6px; padding:6px 10px; margin:6px 0; width:fit-content}
+.dqtgrid span{text-align:right; color:var(--text)}
+.dqtgrid span:nth-child(-n+8){color:var(--warn)} /* first row highlight like standard tables */
+.legend{display:flex; gap:12px; margin-top:6px; font-size:11.5px; color:var(--dim)}
+.legend i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px}
+a{color:var(--accent)}
+.placeholder{color:var(--dim); padding:20px 4px}
+.guide{display:inline-block; margin-top:10px; font-size:11px; color:var(--accent); cursor:pointer}
+.guide:hover{text-decoration:underline}
+
+/* ---------- advanced tool extras ---------- */
+.runbtn{width:100%; margin-top:12px; padding:8px 0; background:#1b3a44; border-color:var(--accent2)}
+.runbtn:hover:not(:disabled){background:#21505e}
+.scorerow{display:flex; align-items:center; gap:8px; padding:5px 6px; border-bottom:1px solid #1b222c; font-size:12.5px}
+.scorerow:last-child{border-bottom:none}
+.sc-name{flex:none; width:150px; color:var(--text)}
+.sc-note{color:var(--dim); font-size:11.5px; text-align:right; flex:1}
+.dot{flex:none; width:9px; height:9px; border-radius:50%}
+.dot.green{background:var(--ok)} .dot.amber{background:var(--warn)} .dot.red{background:var(--bad)}
+#scoreVerdict{font:bold 15px ui-monospace,Consolas,monospace; color:var(--text); margin-top:-46px;
+  position:relative; top:52px; pointer-events:none}
+.hashrow{display:flex; align-items:center; gap:6px; margin:4px 0; font-size:11px}
+.hashrow span{flex:none; width:64px; color:var(--dim)}
+.hashrow code{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  background:#0b0e13; border:1px solid var(--border); border-radius:4px; padding:3px 6px;
+  font-family:ui-monospace,Consolas,monospace}
+.copybtn{flex:none; font-size:10px; padding:2px 7px}
+.thumbPrev{max-width:150px; max-height:110px; border:1px solid var(--border); border-radius:6px;
+  display:block; margin:4px 0; image-rendering:auto}
+#helpWrap{position:fixed; inset:0; background:rgba(4,7,11,.66); display:flex; align-items:center; justify-content:center; z-index:60}
+#helpDlg{width:430px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px}
+#helpDlg h2{margin:0 0 10px; font-size:14px; color:var(--accent)}
+#helpBody p{font-size:12.5px; color:var(--text); margin:0 0 8px}
+#helpBody p:first-child{color:var(--dim)}
+
+/* ---------- toast ---------- */
+#toast{
+  position:fixed; left:50%; bottom:40px; transform:translateX(-50%);
+  background:#20262f; border:1px solid var(--accent2); border-radius:8px;
+  padding:9px 18px; z-index:99; box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+/* ---------- report dialog ---------- */
+#dlgWrap{position:fixed; inset:0; background:rgba(4,7,11,.66); display:flex; align-items:center; justify-content:center; z-index:50}
+#dlg{width:400px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px}
+#dlg h2{margin:0 0 8px; font-size:15px}
+#dlg label{display:block; color:var(--dim); margin:10px 0 4px; font-size:12px}
+#dlg input,#dlg textarea{width:100%; background:#0b0e13; border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 9px; font:inherit; resize:vertical}
+#dlg .row{display:flex; justify-content:flex-end; gap:8px; margin-top:16px}
+button.primary{background:var(--accent); border-color:var(--accent); color:#04252c; font-weight:700}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#27303d;border-radius:6px;border:2px solid var(--bg)}
+@media (max-width:1150px){ aside#left{width:200px} aside#right{width:270px} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">◧ ForenScope<small>forensic image analysis · runs 100% locally</small></div>
+  <div class="hbtns">
+    <button id="btnOpen">📂 Open image…</button>
+    <input type="file" id="file" accept="image/*" hidden/>
+    <button id="btnSample" title="Generate a demo image with planted manipulations">🧪 Sample</button>
+    <button id="btnSave" disabled>⬇ Save current view</button>
+    <button id="btnReport" disabled title="Export everything as a PDF report">🧾 PDF report</button>
+    <span class="sep"></span>
+    <button id="btnFit" disabled title="Fit to window (0)">Fit</button>
+    <button id="btn100" disabled title="Actual pixels (1)">1:1</button>
+    <button id="btnZo" disabled>−</button>
+    <span class="zpct" id="zoomPct">—</span>
+    <button id="btnZi" disabled>+</button>
+  </div>
+</header>
+
+<div id="app">
+
+  <!-- ============ tools ============ -->
+  <aside id="left">
+    <nav id="tools">
+      <button class="tool" data-t="original" disabled>🖼 Original<span>full-quality viewer + magnifier</span></button>
+      <button class="tool active" data-t="ela" disabled>⚡ Error Level Analysis<span>ELA — compression differences</span></button>
+      <button class="tool" data-t="gradient" disabled>◐ Luminance Gradient<span>edges &amp; lighting direction</span></button>
+      <button class="tool" data-t="noise" disabled>▚ Noise / High-Pass<span>sensor-noise consistency</span></button>
+      <button class="tool" data-t="bits" disabled>▦ Bit Planes<span>hidden pixels (LSB)</span></button>
+      <button class="tool" data-t="ghost" disabled>👻 JPEG Ghost<span>multi-quality history map</span></button>
+      <button class="tool" data-t="cmfd" disabled>⧉ Copy-Move Detection<span>cloned-region matching</span></button>
+      <button class="tool" data-t="prnu" disabled>◈ PRNU Consistency<span>sensor-fingerprint noise</span></button>
+      <button class="tool" data-t="freq" disabled>∿ Frequency / FFT<span>spectral anomalies</span></button>
+      <button class="tool" data-t="deepfake" disabled>🤖 Deepfake Heuristics<span>AI-artifact screening</span></button>
+      <button class="tool" data-t="resamp" disabled>↔ Resampling Detection<span>resize interpolation traces</span></button>
+      <button class="tool" data-t="stego" disabled>🔐 Steganalysis (LSB)<span>chi-square hidden-data test</span></button>
+      <button class="tool" data-t="quant" disabled># Quantization Tables<span>encoder quality estimate</span></button>
+    </nav>
+
+    <section class="params hidden" id="grp-original">
+      <p class="hint">Hover the image for the circular magnifier (always samples the pristine original). Ctrl+wheel zooms at the cursor.</p>
+      <a class="guide" data-help="original">ⓘ guide</a>
+    </section>
+
+    <section class="params" id="grp-ela">
+      <label>Re-save quality (JPEG) <output id="elaQOut">90</output></label>
+      <input type="range" id="elaQ" min="50" max="98" value="90"/>
+      <label>Difference amplification ×<output id="elaAmpOut">20</output></label>
+      <input type="range" id="elaAmp" min="2" max="60" value="20"/>
+      <label class="chk"><input type="checkbox" id="elaGray"/> Grayscale output</label>
+      <p class="hint">The image is re-compressed as JPEG and the difference is amplified. Areas with a <b>different</b> editing/compression history glow brighter than their surroundings — look for inconsistent regions, not bright edges.</p>
+      <a class="guide" data-help="ela">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-gradient">
+      <label>Gain ×<output id="gradGainOut">8</output></label>
+      <input type="range" id="gradGain" min="1" max="24" value="8"/>
+      <p class="hint">Horizontal + vertical luminance gradients. Useful for spotting spliced edges and checking that light/shadow transitions are consistent across the picture.</p>
+      <a class="guide" data-help="gradient">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-noise">
+      <label>Gain ×<output id="noiseGainOut">14</output></label>
+      <input type="range" id="noiseGain" min="2" max="40" value="14"/>
+      <p class="hint">High-pass residual (pixel minus local mean) reveals sensor noise. Uniform regions should share texture — smooth “dead” patches or mismatched noise suggest resampling, inpainting or paste-overs.</p>
+      <a class="guide" data-help="noise">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-bits">
+      <label>Channel</label>
+      <div class="seg" id="bitChSel">
+        <button data-c="0">R</button><button data-c="1">G</button><button data-c="2" class="on">B</button><button data-c="3">Y</button>
+      </div>
+      <label>Bit plane</label>
+      <div class="seg" id="bitNSel">
+        <button data-n="0" class="on">0</button><button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button>
+        <button data-n="4">4</button><button data-n="5">5</button><button data-n="6">6</button><button data-n="7">7</button>
+      </div>
+      <p class="hint">Shows one bit of one channel. Bit&nbsp;0 (LSB) can expose pasted regions, watermarks or steganography that survive visually unnoticed.</p>
+      <a class="guide" data-help="bits">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-ghost">
+      <p class="hint">Re-encodes the image at quality 40–95 and maps which quality each region matches best. A <b>second cluster</b> at a different quality than the dominant one suggests regions saved in an earlier editing cycle.</p>
+      <button class="runbtn" id="btnRunGhost">Run JPEG Ghost (slow)</button>
+      <a class="guide" data-help="ghost">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-cmfd">
+      <label>Similarity threshold (SSD)<output id="cmfdSimOut">12</output></label>
+      <input type="range" id="cmfdSim" min="4" max="30" value="12"/>
+      <label>Minimum cluster votes<output id="cmfdMinOut">60</output></label>
+      <input type="range" id="cmfdMin" min="20" max="250" value="60"/>
+      <p class="hint">Finds patches duplicated <i>within</i> the image (clone stamping). Lower the threshold for subtle clones; raise votes to suppress texture false-positives. Rotated or scaled copies are not detected.</p>
+      <button class="runbtn" id="btnRunCmfd">Run copy-move scan</button>
+      <a class="guide" data-help="cmfd">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-prnu">
+      <p class="hint">Correlates sensor-noise residuals between grid cells. Uniform correlation is expected from one sensor; isolated weak cells hint at spliced-in content. Needs lightly-compressed originals.</p>
+      <button class="runbtn" id="btnRunPrnu">Re-run PRNU analysis</button>
+      <a class="guide" data-help="prnu">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-freq">
+      <p class="hint">Log power spectrum with radial energy profile. Natural images decay smoothly; off-center bright spots, axis spikes or rings point to synthetic patterns, grids or upsampling.</p>
+      <a class="guide" data-help="freq">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-deepfake">
+      <p class="hint"><b>Heuristic screening, not a neural detector:</b> spectral slope, angular anisotropy, chroma over-smoothness and micro-texture balance of the center crop are scored 0–100. High scores only mean “inspect manually”.</p>
+      <a class="guide" data-help="deepfake">ⓘ limitations &amp; details</a>
+    </section>
+
+    <section class="params hidden" id="grp-resamp">
+      <p class="hint">Autocorrelates the |Laplacian| along rows/columns. Periodic peaks at lags outside the JPEG 8-pixel grid indicate prior resizing/resampling of parts or all of the image.</p>
+      <a class="guide" data-help="resamp">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-stego">
+      <label>Channel</label>
+      <div class="seg" id="stegoChSel">
+        <button data-c="0">R</button><button data-c="1">G</button><button data-c="2" class="on">B</button>
+      </div>
+      <p class="hint">Chi-square attack over sequential LSB chunks. Sustained p&nbsp;&gt;&nbsp;0.5 across most chunks is consistent with LSB-embedded data; red blocks mark locally suspect areas on the LSB plane.</p>
+      <a class="guide" data-help="stego">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-quant">
+      <p class="hint">Compares the file’s quantization tables against the standard IJG curve to estimate encoder quality and flag anomalies such as diverging luma/chroma qualities (double-compression hint). JPEG only.</p>
+      <a class="guide" data-help="quant">ⓘ how to read this</a>
+    </section>
+
+    <p class="disclaimer">Results are <b>indicators, not proof</b>. ELA is most meaningful on JPEGs saved directly from the camera with metadata intact; images re-shared through social apps compress everything uniformly and lose signal.</p>
+  </aside>
+
+  <!-- ============ stage ============ -->
+  <main id="center">
+    <div id="stage">
+      <div id="stageInner">
+        <div id="drop">Drop an image here
+          <small>or use “Open image…” · paste with Ctrl+V</small>
+        </div>
+      </div>
+      <div id="mag" class="hidden"><canvas id="magCv" width="176" height="176"></canvas></div>
+    </div>
+    <footer id="status">
+      <span id="stName">no image loaded</span>
+      <span id="stDims"></span>
+      <span id="stSize"></span>
+      <span id="stFmt"></span>
+      <span style="margin-left:auto"><span id="stPos"></span> <span id="stHex"></span></span>
+    </footer>
+  </main>
+
+  <!-- ============ inspector ============ -->
+  <aside id="right">
+    <div id="tabs">
+      <button data-tab="meta" class="on">Metadata</button>
+      <button data-tab="hist">Histogram</button>
+      <button data-tab="struct">Structure</button>
+      <button data-tab="scores">Scores</button>
+    </div>
+    <div class="tab on" id="tab-meta"><p class="placeholder">Load an image to inspect its EXIF / PNG metadata and automatic findings.</p></div>
+    <div class="tab hidden" id="tab-hist">
+      <canvas id="histCv" width="256" height="150" style="width:100%"></canvas>
+      <div class="legend">
+        <span><i style="background:#ff5f5f"></i>R</span><span><i style="background:#69e06e"></i>G</span>
+        <span><i style="background:#5aa9ff"></i>B</span><span><i style="background:#ddd"></i>Luma</span>
+      </div>
+      <div id="histNote" class="placeholder"></div>
+    </div>
+    <div class="tab hidden" id="tab-struct"><p class="placeholder">Load an image to see its JPEG segments / quantization tables / PNG chunks.</p></div>
+    <div class="tab hidden" id="tab-scores">
+      <h3>Overall authenticity</h3>
+      <div style="position:relative">
+        <canvas id="gaugeCv" style="width:100%; max-width:260px"></canvas>
+        <div id="scoreVerdict">—</div>
+      </div>
+      <div id="scoreList"><p class="hint">Load an image — light analyses run automatically.</p></div>
+      <h3>Perceptual &amp; cryptographic hashes</h3>
+      <div id="hashList"></div>
+    </div>
+  </aside>
+</div>
+
+<div id="helpWrap" class="hidden">
+  <div id="helpDlg">
+    <h2 id="helpTitle"></h2>
+    <div id="helpBody"></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:10px">
+      <button id="helpClose" class="primary">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<div id="dlgWrap" class="hidden">
+  <div id="dlg">
+    <h2>Generate PDF report</h2>
+    <label>Case / exhibit ID</label>
+    <input id="repCase" placeholder="e.g. CASE-2026-014"/>
+    <label>Analyst</label>
+    <input id="repAnalyst" placeholder="your name"/>
+    <label>Notes</label>
+    <textarea id="repNotes" rows="3" placeholder="observations, chain-of-custody remarks…"></textarea>
+    <p class="hint">The report includes file hashes (SHA-256/SHA-1/MD5, perceptual aHash/dHash), the authenticity score with component breakdown, automatic findings, all metadata,
+    JPEG/PNG structure with quantization tables, the histogram, every analysis view
+    and all advanced analyses (JPEG Ghost · Copy-Move · PRNU · FFT · Deepfake heuristics · Resampling · Steganalysis · Quantization).</p>
+    <div class="row">
+      <button id="repCancel">Cancel</button>
+      <button id="repGo" class="primary">Generate PDF</button>
+    </div>
+  </div>
+</div>
+
+<script src="core.js"></script>
+<script src="meta.js"></script>
+<script src="analysis.js"></script>
+<script src="guides.js"></script>
+<script src="advui.js"></script>
+<script src="report.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
