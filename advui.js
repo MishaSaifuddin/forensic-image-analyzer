@@ -430,11 +430,18 @@ ADV_RENDER.tamper = async function(){
   for (let p = 0, i = 0; p < r.heatmap.length; p++, i += 4){
     if (r.contourMask[p]){
       ro[i] = 235; ro[i+1] = 45; ro[i+2] = 55;
-      ro[i+3] = 110;                            /* ~43% red, rest shows original */
+      ro[i+3] = 150;                             /* ~59% red, original shows through */
     }
   }
   rxCv.putImageData(rd, 0, 0);
-  /* composite red tint OVER the untouched original -> content behind stays visible */
+
+  /* full-extent fill: translucent red over each region's whole bounding box,
+     so the ENTIRE tampered area is visibly marked, not just interior specks */
+  ox.globalAlpha = 0.28;
+  ox.fillStyle = '#e0333a';
+  for (const reg of r.regions) ox.fillRect(reg.x, reg.y, reg.w, reg.h);
+  ox.globalAlpha = 1;
+  /* composite per-pixel tint OVER the untouched original -> content behind stays visible */
   ox.drawImage(redCv, 0, 0);
 
   if (showContours){
@@ -472,7 +479,8 @@ ADV_RENDER.tamper = async function(){
     const v = clamp01(r.heatmap[p]);
     const rgb = heatRGB(v);
     o[i] = rgb[0]; o[i+1] = rgb[1]; o[i+2] = rgb[2];
-    o[i+3] = v > 0.01 ? Math.round(opacity * 255) : 0;
+    const isFlagged = r.contourMask[p];
+    o[i+3] = isFlagged ? 250 : (v > 0.01 ? Math.round(opacity * 255) : 0);
   }
   hx.putImageData(id, 0, 0);
 
@@ -520,13 +528,45 @@ ADV_RENDER.tamper = async function(){
   legCx.font = '9px monospace';
   legCx.fillText('blue = likely safe', 12, 250);
 
-  /* ---- compose: Original | Heatmap | Legend ---- */
+  /* ---- compose: Original | Heatmap | Legend + zoomed closeups rows ---- */
   const gap = 10;
   const fullW = W * 2 + gap * 2 + legW;
-  const fullCv = mkCanvas(fullW, H), fullCx = ctx2d(fullCv);
+
+  /* row 2: zoomed-in closeups of the detected regions so the FULL
+     tampered area is clearly visible with the content behind it */
+  const closeHeights = [];
+  const closeups = [];
+  r.regions.slice(0, 6).forEach((reg, idx) => {
+    const k = Math.min(2.4, 260 / Math.max(reg.w, reg.h));
+    const cw = Math.max(1, Math.round(reg.w * k)), ch = Math.max(1, Math.round(reg.h * k));
+    const cCv = mkCanvas(cw, ch), ccx = ctx2d(cCv);
+    ccx.imageSmoothingEnabled = true;
+    ccx.drawImage(origCv, reg.x, reg.y, reg.w, reg.h, 0, 0, cw, ch);
+    ccx.strokeStyle = 'rgba(255,70,80,0.95)';
+    ccx.lineWidth = 2.5;
+    ccx.strokeRect(1, 1, cw - 2, ch - 2);
+    const bCv = mkCanvas(cw, ch + 20), bcx = ctx2d(bCv);
+    bcx.fillStyle = '#0c1016';
+    bcx.fillRect(0, 0, cw, ch + 20);
+    bcx.drawImage(cCv, 0, 0);
+    bcx.fillStyle = '#f2b0b0';
+    bcx.font = 'bold 10px monospace';
+    bcx.textAlign = 'center';
+    bcx.fillText(`TAMPERED REGION #${idx + 1} \u2014 ${reg.w}\u00d7${reg.h}px`, cw / 2, ch + 13);
+    closeups.push(bCv);
+    closeHeights.push(bCv.height);
+  });
+  const row2H = closeups.length ? Math.max(...closeHeights) : 0;
+
+  const fullCv = mkCanvas(fullW, H + (row2H ? gap + row2H : 0)), fullCx = ctx2d(fullCv);
   fullCx.drawImage(origCv, 0, 0);
   fullCx.drawImage(hmCv, W + gap, 0);
   fullCx.drawImage(legCv, W * 2 + gap * 2, 0);
+  let cx0 = 0;
+  for (const cl of closeups){
+    fullCx.drawImage(cl, cx0, H + gap);
+    cx0 += cl.width + gap;
+  }
 
   const lines = [
     `Block size: ${blk}px \u00b7 Sensitivity: ${sens}`,
@@ -538,7 +578,7 @@ ADV_RENDER.tamper = async function(){
     );
     lines.push('Top suspicious regions:');
     lines.push(...top3);
-    lines.push('Left panel = FULL original with the edited area tinted red \u2014 the underlying content stays visible.');
+    lines.push('Left panel = FULL original with the edited area tinted red \u2014 the underlying content stays visible. Zoomed closeups below show each tampered region up close.');
   }
   lines.push(
     r.flagged
@@ -548,12 +588,12 @@ ADV_RENDER.tamper = async function(){
 
   S.advScoreTamper = r.flaggedPct > 20 ? 0.85 : r.flaggedPct > 10 ? 0.5 : r.flaggedPct > 3 ? 0.25 : 0;
 
-  /* shrink so the side-by-side fits the stage */
+  /* shrink so the composition fits the stage */
   const maxW = 1200;
   let outCv = fullCv;
   if (fullW > maxW){
     const k = maxW / fullW;
-    outCv = mkCanvas(Math.round(fullW * k), Math.round(H * k));
+    outCv = mkCanvas(Math.round(fullW * k), Math.round(fullCv.height * k));
     ctx2d(outCv).imageSmoothingEnabled = true;
     ctx2d(outCv).drawImage(fullCv, 0, 0, outCv.width, outCv.height);
   }

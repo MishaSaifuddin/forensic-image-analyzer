@@ -803,6 +803,23 @@ function tamperDetect(img, opts){
   }
   regions.sort((a,b)=>b.area-a.area);
 
+  /* dilate the mask by 2px so the FULL extent of each edit is covered,
+     including soft feathered edges the confidence map might miss */
+  {
+    const d1 = new Uint8Array(n);
+    const R = 2;
+    for (let p = 0; p < n; p++){
+      if (!cleanMask[p]) continue;
+      const cx = p % w, cy = (p / w) | 0;
+      const yl = Math.max(0, cy - R), yh = Math.min(h - 1, cy + R);
+      const xl = Math.max(0, cx - R), xh = Math.min(w - 1, cx + R);
+      for (let yy = yl; yy <= yh; yy++)
+        for (let xx = xl; xx <= xh; xx++)
+          d1[yy * w + xx] = 1;
+    }
+    cleanMask.set(d1);
+  }
+
   /* rebuild the mask from qualifying regions only (specks removed) */
   let flaggedCount = 0;
   for (let p = 0; p < n; p++) if (cleanMask[p]) flaggedCount++;
