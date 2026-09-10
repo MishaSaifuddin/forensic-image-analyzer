@@ -741,8 +741,8 @@ function tamperDetect(img, opts){
   }
 
   /* sensitivity thresholding (higher value = stricter) */
-  const threshMap = { low: 0.74, med: 0.64, high: 0.56 };
-  const threshold = threshMap[sensitivity] || 0.64;
+  const threshMap = { low: 0.72, med: 0.70, high: 0.64 };
+  const threshold = opts.thresh || (threshMap[sensitivity] || 0.70);
 
   /* light box blur (radius 2) to suppress speckle and edge bands */
   {
@@ -808,5 +808,5 @@ function tamperDetect(img, opts){
   for (let p = 0; p < n; p++) if (cleanMask[p]) flaggedCount++;
   const flaggedPct = +(flaggedCount/n*100).toFixed(1);
   return { heatmap, contourMask: cleanMask, regions, flaggedPct,
-           flagged: flaggedPct > 3 };
+           flagged: flaggedPct > 5 };
 }
