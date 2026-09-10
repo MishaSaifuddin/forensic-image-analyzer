@@ -389,9 +389,28 @@ ADV_RENDER.tamper = async function(){
   const opacity = (+($('#tamperOp')?.value || 75)) / 100;
   const showContours = $('#tamperContours')?.checked !== false;
 
-  const r = tamperDetect({data:ds.data, width:ds.width, height:ds.height}, {blk, sensitivity:sens});
-
   const W = ds.width, H = ds.height;
+
+  /* ELA map computed on THIS downscaled image (correct dimensions) */
+  const srcCv = mkCanvas(W, H);
+  const scx = ctx2d(srcCv);
+  scx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), 0, 0);
+  let elaMap = null;
+  try{
+    const dec = await decodeURL(scx.toDataURL('image/jpeg', S.elaQ));
+    const rc = mkCanvas(W, H);
+    const rcx = ctx2d(rc);
+    rcx.drawImage(dec, 0, 0);
+    const rb = rcx.getImageData(0, 0, W, H).data;
+    const a = ds.data, amp = S.elaAmp || 20;
+    elaMap = new Float32Array(W * H);
+    for (let p = 0, i = 0; p < W * H; p++, i += 4){
+      const d = (Math.abs(a[i]-rb[i]) + Math.abs(a[i+1]-rb[i+1]) + Math.abs(a[i+2]-rb[i+2])) / 3 * amp;
+      elaMap[p] = Math.min(1, d / 255);
+    }
+  }catch(e){ console.warn('ELA skip', e); }
+
+  const r = tamperDetect({data:ds.data, width:W, height:H}, {blk, sensitivity:sens, elaMap});
 
   /* ---- Panel 1: ORIGINAL with edited areas highlighted ----
      The untouched original at full brightness. A SOFT red translucent

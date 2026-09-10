@@ -546,14 +546,24 @@ function tamperDetect(img, opts){
 
   const g = grayFrom(data, w, h);
 
-  /* --- 1. ELA inconsistency map --- */
+  /* --- 1. ELA inconsistency map ---
+     Passed in from the UI layer, computed on the SAME downscaled image
+     (dimensions must match w,h). Self-computed fallback via local contrast
+     so the function stays DOM-free. */
   const elaMap = new Float32Array(w * h);
-  if (typeof S !== 'undefined' && S.resave){
-    const a = S.data.data, b = S.resave.data;
-    const k = S.elaAmp || 20;
-    for (let p = 0, i = 0; p < w * h; p++, i += 4){
-      const d = (Math.abs(a[i]-b[i]) + Math.abs(a[i+1]-b[i+1]) + Math.abs(a[i+2]-b[i+2])) / 3 * k;
-      elaMap[p] = Math.min(1, d / 255);
+  if (opts.elaMap && opts.elaMap.length === w * h){
+    elaMap.set(opts.elaMap);
+  } else {
+    for (let y = 0; y < h; y++){
+      for (let x = 0; x < w; x++){
+        const i = y * w + x;
+        const l = g[i];
+        const ll = x > 0 ? g[i - 1] : l;
+        const rr = x < w - 1 ? g[i + 1] : l;
+        const uu = y > 0 ? g[i - w] : l;
+        const dd = y < h - 1 ? g[i + w] : l;
+        elaMap[i] = Math.min(1, Math.abs(l - (ll + rr + uu + dd) / 4) / 40);
+      }
     }
   }
 
@@ -691,16 +701,28 @@ function tamperDetect(img, opts){
   /* --- combine signals --- */
   const n = w * h;
   const heatmap = new Float32Array(n);
-  const weights = { ela: 0.30, noise: 0.30, edge: 0.25, stat: 0.15 };
+  const weights = { ela: 0.32, noise: 0.28, edge: 0.24, stat: 0.16 };
 
   for (let p = 0; p < n; p++){
     heatmap[p] = elaMap[p]*weights.ela + noiseMap[p]*weights.noise
                + edgeMap[p]*weights.edge + statMap[p]*weights.stat;
   }
 
+  /* contrast boost: stretch values so real tamper evidence is vivid */
+  let maxH = 0;
+  for (let p = 0; p < n; p++) if (heatmap[p] > maxH) maxH = heatmap[p];
+  if (maxH > 0){
+    const gain = 2.2 / (maxH > 0 ? maxH : 1);
+    for (let p = 0; p < n; p++){
+      let v = heatmap[p] * gain;
+      v = Math.pow(Math.min(1, v), 0.85);      /* gentle gamma keeps low tiers visible */
+      heatmap[p] = v;
+    }
+  }
+
   /* sensitivity thresholding */
-  const threshMap = { low: 0.18, med: 0.12, high: 0.07 };
-  const threshold = threshMap[sensitivity] || 0.12;
+  const threshMap = { low: 0.55, med: 0.42, high: 0.28 };
+  const threshold = threshMap[sensitivity] || 0.42;
 
   /* contour detection: find connected high-confidence regions */
   const contourMask = new Uint8Array(n);
