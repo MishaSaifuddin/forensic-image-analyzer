@@ -379,6 +379,104 @@ ADV_RENDER.quant = function(){
   finish('quant','Quantization table analysis',cv,lines);
 };
 
+/* ================= TAMPER DETECTION ================= */
+ADV_RENDER.tamper = async function(){
+  toast('Running tamper detection scan\u2026');
+  const ds = prepImg(800);
+  const blk = +($('#tamperBlk')?.value || 16);
+  const sensBtn = $('#tamperSensSel button.on');
+  const sens = sensBtn ? sensBtn.dataset.s : 'med';
+  const opacity = (+($('#tamperOp')?.value || 75)) / 100;
+  const showContours = $('#tamperContours')?.checked !== false;
+
+  const r = tamperDetect({data:ds.data, width:ds.width, height:ds.height}, {blk, sensitivity:sens});
+
+  const W = ds.width, H = ds.height;
+  const cv = mkCanvas(W, H), cx = ctx2d(cv);
+
+  /* draw dimmed original */
+  const tmpCv = mkCanvas(W, H);
+  const tmpCx = ctx2d(tmpCv);
+  tmpCx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), 0, 0);
+  cx.globalAlpha = 0.45;
+  cx.drawImage(tmpCv, 0, 0);
+  cx.globalAlpha = 1;
+
+  /* draw heatmap */
+  const id = cx.createImageData(W, H), o = id.data;
+  for (let p = 0, i = 0; p < W*H; p++, i += 4){
+    const v = clamp01(r.heatmap[p]);
+    const rgb = heatRGB(v);
+    o[i] = rgb[0]; o[i+1] = rgb[1]; o[i+2] = rgb[2];
+    o[i+3] = v > 0.01 ? Math.round(opacity * 255) : 0;
+  }
+  cx.putImageData(id, 0, 0);
+
+  /* contour outlines */
+  if (showContours){
+    cx.strokeStyle = 'rgba(255,80,80,0.8)';
+    cx.lineWidth = 1.5;
+    r.regions.slice(0, 20).forEach((reg, idx) => {
+      cx.strokeRect(reg.x, reg.y, reg.w, reg.h);
+      cx.fillStyle = 'rgba(255,80,80,0.9)';
+      cx.font = 'bold 10px monospace';
+      const lbl = `#${idx+1}`;
+      cx.fillText(lbl, reg.x + 2, reg.y - 3 > 10 ? reg.y - 3 : reg.y + 12);
+    });
+  }
+
+  /* legend */
+  const legW = 180, legH = 220;
+  const legCv = mkCanvas(legW, legH), legCx = ctx2d(legCv);
+  legCx.fillStyle = 'rgba(15,19,26,0.92)';
+  legCx.fillRect(0, 0, legW, legH);
+  legCx.fillStyle = '#d7dde6';
+  legCx.font = 'bold 10px monospace';
+  legCx.fillText('TAMPER HEATMAP', 8, 16);
+
+  for (let y = 0; y < 140; y++){
+    const v = 1 - y / 140;
+    const rgb = heatRGB(v);
+    legCx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    legCx.fillRect(12, 26 + y, 16, 1);
+  }
+  legCx.fillStyle = '#8a94a3';
+  legCx.font = '9px monospace';
+  legCx.fillText('high', 34, 34);
+  legCx.fillText('low', 34, 162);
+  legCx.fillText('safe', 34, 174);
+
+  legCx.fillStyle = '#d7dde6';
+  legCx.font = '10px monospace';
+  legCx.fillText(`Flagged: ${r.flaggedPct}%`, 12, 194);
+  legCx.fillText(`Regions: ${r.regions.length}`, 12, 208);
+
+  const fullCv = mkCanvas(W + legW + 8, Math.max(H, legH));
+  const fullCx = ctx2d(fullCv);
+  fullCx.drawImage(cv, 0, 0);
+  fullCx.drawImage(legCv, W + 8, 0);
+
+  const lines = [
+    `Block size: ${blk}px \u00b7 Sensitivity: ${sens}`,
+    `Flagged area: ${r.flaggedPct}% of image \u00b7 Suspicious regions: ${r.regions.length}`,
+  ];
+  if (r.regions.length > 0){
+    const top3 = r.regions.slice(0, 3).map((reg, i) =>
+      `  Region #${i+1}: ${reg.w}\u00d7${reg.h}px at (${reg.x},${reg.y}), avg confidence ${reg.avgConf}`
+    );
+    lines.push('Top suspicious regions:');
+    lines.push(...top3);
+  }
+  lines.push(
+    r.flagged
+      ? '\u26a0 Multiple anomalous regions detected \u2014 strong tamper indicators. Inspect with ELA and Noise tools.'
+      : '\u2713 No significant tamper indicators above threshold.'
+  );
+
+  S.advScoreTamper = r.flaggedPct > 20 ? 0.85 : r.flaggedPct > 10 ? 0.5 : r.flaggedPct > 3 ? 0.25 : 0;
+  finish('tamper', 'Tamper Detection (composite heatmap)', fullCv, lines);
+};
+
 /* ================= SCORES DASHBOARD ================= */
 function computeScores(){
   if (!S.img) return;
@@ -401,6 +499,7 @@ function computeScores(){
   if (S.advScoreResamp != null) add('Resampling traces', S.advScoreResamp, 'interpolation signature');
   if (S.advScoreStego  != null) add('LSB steganalysis', S.advScoreStego, 'chi-square');
   if (S.advScoreQuant  != null) add('Quantization anomalies', S.advScoreQuant, 'DQT vs IJG');
+  if (S.advScoreTamper != null) add('Tamper detection', S.advScoreTamper, 'composite heatmap');
 
   /* ELA surface-brightness spread as a weak component */
   if (S.resave){

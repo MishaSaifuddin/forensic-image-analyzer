@@ -524,7 +524,7 @@ function aggregateScore(components){
     'Metadata integrity':14,'JPEG ghost clusters':16,'Copy-move regions':18,
     'PRNU consistency':10,'Frequency anomalies':8,'AI-artifact heuristics':6,
     'Resampling traces':10,'LSB steganalysis':6,'Quantization anomalies':4,
-    'ELA response variance':8
+    'ELA response variance':8,'Tamper detection':20
   };
   const rows=[];
   for(const c of components){
@@ -536,4 +536,213 @@ function aggregateScore(components){
   score=Math.max(3,Math.min(98,Math.round(score)));
   const risk=score>=80?'low':score>=60?'medium':score>=40?'elevated':'high';
   return {score,risk,rows};
+}
+
+/* ---------------- tamper detection (composite heatmap) ---------------- */
+function tamperDetect(img, opts){
+  const {data, width:w, height:h} = img;
+  const blk = opts.blk || 16;
+  const sensitivity = opts.sensitivity || 'med';
+
+  const g = grayFrom(data, w, h);
+
+  /* --- 1. ELA inconsistency map --- */
+  const elaMap = new Float32Array(w * h);
+  if (typeof S !== 'undefined' && S.resave){
+    const a = S.data.data, b = S.resave.data;
+    const k = S.elaAmp || 20;
+    for (let p = 0, i = 0; p < w * h; p++, i += 4){
+      const d = (Math.abs(a[i]-b[i]) + Math.abs(a[i+1]-b[i+1]) + Math.abs(a[i+2]-b[i+2])) / 3 * k;
+      elaMap[p] = Math.min(1, d / 255);
+    }
+  }
+
+  /* --- 2. Noise inconsistency map --- */
+  const noiseMap = new Float32Array(w * h);
+  {
+    const noise = new Float32Array(w * h);
+    for (let y = 0; y < h; y++){
+      for (let x = 0; x < w; x++){
+        let sum = 0, cnt = 0;
+        for (let dy = -1; dy <= 1; dy++){
+          const yy = y + dy; if (yy < 0 || yy >= h) continue;
+          for (let dx = -1; dx <= 1; dx++){
+            if (!dx && !dy) continue;
+            const xx = x + dx; if (xx < 0 || xx >= w) continue;
+            sum += g[yy * w + xx]; cnt++;
+          }
+        }
+        noise[y * w + x] = Math.abs(g[y * w + x] - sum / cnt);
+      }
+    }
+    const bw = Math.ceil(w / blk), bh = Math.ceil(h / blk);
+    const blockNoise = new Float32Array(bw * bh);
+    for (let by = 0; by < bh; by++){
+      for (let bx = 0; bx < bw; bx++){
+        let s = 0, c = 0;
+        const y0 = by * blk, y1 = Math.min(y0 + blk, h);
+        const x0 = bx * blk, x1 = Math.min(x0 + blk, w);
+        for (let y = y0; y < y1; y += 2){
+          for (let x = x0; x < x1; x += 2){
+            s += noise[y * w + x]; c++;
+          }
+        }
+        blockNoise[by * bw + bx] = c ? s / c : 0;
+      }
+    }
+    let globalMean = 0, gCnt = 0;
+    for (let i = 0; i < blockNoise.length; i++){ globalMean += blockNoise[i]; gCnt++; }
+    globalMean /= gCnt || 1;
+    for (let by = 0; by < bh; by++){
+      for (let bx = 0; bx < bw; bx++){
+        const dev = Math.abs(blockNoise[by * bw + bx] - globalMean) / (globalMean || 1);
+        const v = Math.min(1, dev * 2);
+        const y0 = by * blk, y1 = Math.min(y0 + blk, h);
+        const x0 = bx * blk, x1 = Math.min(x0 + blk, w);
+        for (let y = y0; y < y1; y++)
+          for (let x = x0; x < x1; x++)
+            noiseMap[y * w + x] = v;
+      }
+    }
+  }
+
+  /* --- 3. Edge discontinuity map --- */
+  const edgeMap = new Float32Array(w * h);
+  {
+    const sobel = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++){
+      for (let x = 1; x < w - 1; x++){
+        const i00 = g[(y-1)*w+(x-1)], i01 = g[(y-1)*w+x], i02 = g[(y-1)*w+(x+1)];
+        const i20 = g[(y+1)*w+(x-1)], i21 = g[(y+1)*w+x], i22 = g[(y+1)*w+(x+1)];
+        const gx = -i00 - 2*i01 - i02 + i20 + 2*i21 + i22;
+        const gy = -i00 - 2*i20 - i22 + i01 + 2*i01 + i02;
+        sobel[y*w+x] = Math.sqrt(gx*gx + gy*gy);
+      }
+    }
+    const bw = Math.ceil(w / blk), bh = Math.ceil(h / blk);
+    const blockEdge = new Float32Array(bw * bh);
+    for (let by = 0; by < bh; by++){
+      for (let bx = 0; bx < bw; bx++){
+        let s = 0, c = 0;
+        const y0 = by * blk, y1 = Math.min(y0 + blk, h);
+        const x0 = bx * blk, x1 = Math.min(x0 + blk, w);
+        for (let y = y0; y < y1; y += 2){
+          for (let x = x0; x < x1; x += 2){
+            s += sobel[y * w + x]; c++;
+          }
+        }
+        blockEdge[by * bw + bx] = c ? s / c : 0;
+      }
+    }
+    for (let by = 0; by < bh; by++){
+      for (let bx = 0; bx < bw; bx++){
+        let neighborSum = 0, neighborCnt = 0;
+        for (let dy = -1; dy <= 1; dy++){
+          for (let dx = -1; dx <= 1; dx++){
+            if (!dx && !dy) continue;
+            const ny = by + dy, nx = bx + dx;
+            if (ny >= 0 && ny < bh && nx >= 0 && nx < bw){
+              neighborSum += blockEdge[ny * bw + nx]; neighborCnt++;
+            }
+          }
+        }
+        const neighborMean = neighborCnt ? neighborSum / neighborCnt : 0;
+        const dev = neighborMean > 0 ? Math.abs(blockEdge[by*bw+bx] - neighborMean) / neighborMean : 0;
+        const v = Math.min(1, dev * 1.5);
+        const y0 = by * blk, y1 = Math.min(y0 + blk, h);
+        const x0 = bx * blk, x1 = Math.min(x0 + blk, w);
+        for (let y = y0; y < y1; y++)
+          for (let x = x0; x < x1; x++)
+            edgeMap[y * w + x] = v;
+      }
+    }
+  }
+
+  /* --- 4. Block color statistics anomaly --- */
+  const statMap = new Float32Array(w * h);
+  {
+    const bw = Math.ceil(w / blk), bh = Math.ceil(h / blk);
+    const blockMeans = [];
+    for (let by = 0; by < bh; by++){
+      for (let bx = 0; bx < bw; bx++){
+        let rS=0, gS=0, bS=0, c=0;
+        const y0=by*blk, y1=Math.min(y0+blk,h), x0=bx*blk, x1=Math.min(x0+blk,w);
+        for (let y=y0;y<y1;y+=2) for (let x=x0;x<x1;x+=2){
+          const i=(y*w+x)*4;
+          rS+=data[i]; gS+=data[i+1]; bS+=data[i+2]; c++;
+        }
+        blockMeans.push(c?[rS/c,gS/c,bS/c]:[128,128,128]);
+      }
+    }
+    const globalR=blockMeans.reduce((a,b)=>a+b[0],0)/blockMeans.length;
+    const globalG=blockMeans.reduce((a,b)=>a+b[1],0)/blockMeans.length;
+    const globalB=blockMeans.reduce((a,b)=>a+b[2],0)/blockMeans.length;
+    for (let by=0;by<bh;by++){
+      for (let bx=0;bx<bw;bx++){
+        const m=blockMeans[by*bw+bx];
+        const dr=Math.abs(m[0]-globalR)/255, dg=Math.abs(m[1]-globalG)/255, db=Math.abs(m[2]-globalB)/255;
+        const v=Math.min(1, (dr+dg+db)*3);
+        const y0=by*blk,y1=Math.min(y0+blk,h),x0=bx*blk,x1=Math.min(x0+blk,w);
+        for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)statMap[y*w+x]=v;
+      }
+    }
+  }
+
+  /* --- combine signals --- */
+  const n = w * h;
+  const heatmap = new Float32Array(n);
+  const weights = { ela: 0.30, noise: 0.30, edge: 0.25, stat: 0.15 };
+
+  for (let p = 0; p < n; p++){
+    heatmap[p] = elaMap[p]*weights.ela + noiseMap[p]*weights.noise
+               + edgeMap[p]*weights.edge + statMap[p]*weights.stat;
+  }
+
+  /* sensitivity thresholding */
+  const threshMap = { low: 0.18, med: 0.12, high: 0.07 };
+  const threshold = threshMap[sensitivity] || 0.12;
+
+  /* contour detection: find connected high-confidence regions */
+  const contourMask = new Uint8Array(n);
+  let flaggedCount = 0;
+  for (let p = 0; p < n; p++){
+    if (heatmap[p] >= threshold){
+      contourMask[p] = 1;
+      flaggedCount++;
+    }
+  }
+
+  /* simple blob detection via flood fill */
+  const visited = new Uint8Array(n);
+  const regions = [];
+  for (let p = 0; p < n; p++){
+    if (!contourMask[p] || visited[p]) continue;
+    let minX=w, minY=h, maxX=0, maxY=0, area=0, sumConf=0;
+    const queue = [p];
+    visited[p] = 1;
+    while (queue.length){
+      const cur = queue.shift();
+      const cx = cur % w, cy = (cur / w) | 0;
+      minX = Math.min(minX, cx); minY = Math.min(minY, cy);
+      maxX = Math.max(maxX, cx); maxY = Math.max(maxY, cy);
+      area++; sumConf += heatmap[cur];
+      for (const [ddx,ddy] of [[-1,0],[1,0],[0,-1],[0,1]]){
+        const nx=cx+ddx, ny=cy+ddy;
+        if (nx<0||nx>=w||ny<0||ny>=h) continue;
+        const ni=ny*w+nx;
+        if (contourMask[ni] && !visited[ni]){ visited[ni]=1; queue.push(ni); }
+      }
+    }
+    if (area >= blk * blk / 4){
+      regions.push({
+        x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1,
+        area, avgConf:+(sumConf/area).toFixed(3)
+      });
+    }
+  }
+  regions.sort((a,b)=>b.area-a.area);
+
+  const flaggedPct = +(flaggedCount/n*100).toFixed(1);
+  return { heatmap, contourMask, regions, flaggedPct,
+           flagged: flaggedPct > 3 };
 }

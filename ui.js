@@ -249,9 +249,15 @@ function wire(){
   });
   bindRun('#btnRunGhost', 'ghost');
   bindRun('#btnRunCmfd',  'cmfd');
+  bindRun('#btnRunTamper', 'tamper');
   bindRun('#btnRunPrnu',  'prnu');
   $('#cmfdSim').addEventListener('input', e => { $('#cmfdSimOut').textContent = e.target.value; });
   $('#cmfdMin').addEventListener('input', e => { $('#cmfdMinOut').textContent = e.target.value; });
+  $('#tamperBlk').addEventListener('input', e => { $('#tamperBlkOut').textContent = e.target.value; });
+  $('#tamperOp').addEventListener('input', e => { $('#tamperOpOut').textContent = e.target.value; });
+  $$('#tamperSensSel button').forEach(b => b.addEventListener('click', () => {
+    $$('#tamperSensSel button').forEach(x => x.classList.toggle('on', x === b));
+  }));
   $$('#stegoChSel button').forEach(b => b.addEventListener('click', () => {
     S.stegoCh = +b.dataset.c;
     $$('#stegoChSel button').forEach(x => x.classList.toggle('on', x === b));

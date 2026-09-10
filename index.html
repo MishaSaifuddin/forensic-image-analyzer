@@ -193,6 +193,7 @@ button.primary{background:var(--accent); border-color:var(--accent); color:#0425
       <button class="tool" data-t="bits" disabled>▦ Bit Planes<span>hidden pixels (LSB)</span></button>
       <button class="tool" data-t="ghost" disabled>👻 JPEG Ghost<span>multi-quality history map</span></button>
       <button class="tool" data-t="cmfd" disabled>⧉ Copy-Move Detection<span>cloned-region matching</span></button>
+      <button class="tool" data-t="tamper" disabled>🎯 Tamper Detection<span>composite manipulation heatmap</span></button>
       <button class="tool" data-t="prnu" disabled>◈ PRNU Consistency<span>sensor-fingerprint noise</span></button>
       <button class="tool" data-t="freq" disabled>∿ Frequency / FFT<span>spectral anomalies</span></button>
       <button class="tool" data-t="deepfake" disabled>🤖 Deepfake Heuristics<span>AI-artifact screening</span></button>
@@ -258,6 +259,23 @@ button.primary{background:var(--accent); border-color:var(--accent); color:#0425
       <p class="hint">Finds patches duplicated <i>within</i> the image (clone stamping). Lower the threshold for subtle clones; raise votes to suppress texture false-positives. Rotated or scaled copies are not detected.</p>
       <button class="runbtn" id="btnRunCmfd">Run copy-move scan</button>
       <a class="guide" data-help="cmfd">ⓘ how to read this</a>
+    </section>
+
+    <section class="params hidden" id="grp-tamper">
+      <label>Block size <output id="tamperBlkOut">16</output>px</label>
+      <input type="range" id="tamperBlk" min="8" max="64" value="16" step="8"/>
+      <label>Sensitivity</label>
+      <div class="seg" id="tamperSensSel">
+        <button data-s="low">Low</button>
+        <button data-s="med" class="on">Med</button>
+        <button data-s="high">High</button>
+      </div>
+      <label>Overlay opacity <output id="tamperOpOut">75</output>%</label>
+      <input type="range" id="tamperOp" min="20" max="100" value="75"/>
+      <label class="chk"><input type="checkbox" id="tamperContours" checked/> Show contour outlines</label>
+      <p class="hint">Fuses ELA variance, noise inconsistency, edge discontinuity and block statistics into a single tamper-confidence heatmap. Blue = likely safe, yellow = suspicious, red = high tamper likelihood.</p>
+      <button class="runbtn" id="btnRunTamper">Run tamper scan</button>
+      <a class="guide" data-help="tamper">ⓘ how to read this</a>
     </section>
 
     <section class="params hidden" id="grp-prnu">
@@ -371,7 +389,7 @@ button.primary{background:var(--accent); border-color:var(--accent); color:#0425
     <textarea id="repNotes" rows="3" placeholder="observations, chain-of-custody remarks…"></textarea>
     <p class="hint">The report includes file hashes (SHA-256/SHA-1/MD5, perceptual aHash/dHash), the authenticity score with component breakdown, automatic findings, all metadata,
     JPEG/PNG structure with quantization tables, the histogram, every analysis view
-    and all advanced analyses (JPEG Ghost · Copy-Move · PRNU · FFT · Deepfake heuristics · Resampling · Steganalysis · Quantization).</p>
+    and all advanced analyses (JPEG Ghost · Copy-Move · Tamper Detection · PRNU · FFT · Deepfake heuristics · Resampling · Steganalysis · Quantization).</p>
     <div class="row">
       <button id="repCancel">Cancel</button>
       <button id="repGo" class="primary">Generate PDF</button>

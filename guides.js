@@ -13,7 +13,8 @@ const HELP = {
   deepfake: ['Heuristic AI-artifact screen of the CENTER region: spectral slope, angular anisotropy, chroma over-smoothness and micro-texture balance.', 'This is NOT neural-network based and cannot recognise specific models. High scores mean "worth a closer look", nothing more.', 'Always corroborate with reverse-image search and provenance.'],
   resamp: ['Detects interpolation traces: the Laplacian signal is autocorrelated along rows/columns; periodic peaks at lags other than the JPEG grid indicate prior resizing.', 'Suspicious: prominence peaks at arbitrary lags in both directions.', 'Limits: JPEG\u2019s own 8px grid is excluded; strong sharpening can mimic weak signals.'],
   stego: ['Chi-square attack on LSB pairs: in natural images, histogram neighbours 2i/2i+1 differ; LSB embedding equalises them, driving chi-square p-values toward 1.', 'Readout: sustained p>0.5 across most sequential chunks suggests embedded data. The stage view tints suspicious blocks red over the LSB plane.', 'Also check the Bit Planes tool visually.'],
-  quant: ['Compares the file\u2019s quantization tables against the standard IJG scaling curve to estimate the encoder quality and flag anomalies like distinct luma/chroma qualities (possible double compression).']
+  quant: ['Compares the file\u2019s quantization tables against the standard IJG scaling curve to estimate the encoder quality and flag anomalies like distinct luma/chroma qualities (possible double compression).'],
+  tamper: ['What it does: Combines four independent forensic signals \u2014 ELA variance, noise inconsistency, edge discontinuity and block color statistics \u2014 into a single tamper-confidence heatmap.', 'Blue regions are consistent with the rest of the image and likely untouched.', 'Yellow regions show mild anomalies \u2014 worth a closer look with other tools.', 'Red regions have strong tamper indicators \u2014 these are the most suspicious areas.', 'The sensitivity setting controls the detection threshold: Low flags only strong anomalies, High flags anything slightly unusual.', 'Limits: Uniform re-compression (social media) flattens ELA; naturally textured areas can trigger false positives. Always corroborate with multiple tools.']
 };
 
 const GUIDE_TITLES = {
@@ -29,5 +30,6 @@ const GUIDE_TITLES = {
   deepfake: 'Deepfake / AI-artifact heuristics',
   resamp: 'Resampling detection',
   stego: 'LSB steganalysis (chi-square)',
-  quant: 'Quantization table analysis'
+  quant: 'Quantization table analysis',
+  tamper: 'Tamper Detection \u2014 composite manipulation heatmap'
 };
