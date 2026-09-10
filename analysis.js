@@ -400,7 +400,7 @@ function chiSqP(x2,df){
   const z=(Math.cbrt(x2/df)-(1-2/(9*df)))/Math.sqrt(2/(9*df));
   return clamp01(0.5*erfc(z/Math.SQRT2));
 }
-const clamp01=v=>v<0?0:v>1?1:v;
+// clamp01 is defined globally in advui.js — analysis.js uses that one
 function stegoChi(img, channel){
   const {data,width:w,height:h}=img;
   const chunks=64,total=w*h,per=total/chunks|0;
@@ -803,11 +803,11 @@ function tamperDetect(img, opts){
   }
   regions.sort((a,b)=>b.area-a.area);
 
-  /* dilate the mask by 2px so the FULL extent of each edit is covered,
+  /* dilate the mask by 1px so the FULL extent of each edit is covered,
      including soft feathered edges the confidence map might miss */
   {
     const d1 = new Uint8Array(n);
-    const R = 2;
+    const R = 1;
     for (let p = 0; p < n; p++){
       if (!cleanMask[p]) continue;
       const cx = p % w, cy = (p / w) | 0;
