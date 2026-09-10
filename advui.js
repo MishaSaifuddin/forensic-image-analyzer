@@ -392,69 +392,121 @@ ADV_RENDER.tamper = async function(){
   const r = tamperDetect({data:ds.data, width:ds.width, height:ds.height}, {blk, sensitivity:sens});
 
   const W = ds.width, H = ds.height;
-  const cv = mkCanvas(W, H), cx = ctx2d(cv);
 
-  /* draw dimmed original */
+  /* ---- Panel 1: ORIGINAL with edited areas highlighted ----
+     The untouched original at full brightness. Only the high-confidence
+     regions get a translucent red mask + outlines, so you can still see
+     the real content (the elements) behind the highlighted spots. */
+  const origCv = mkCanvas(W, H), ox = ctx2d(origCv);
   const tmpCv = mkCanvas(W, H);
   const tmpCx = ctx2d(tmpCv);
   tmpCx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), 0, 0);
-  cx.globalAlpha = 0.45;
-  cx.drawImage(tmpCv, 0, 0);
-  cx.globalAlpha = 1;
+  ox.drawImage(tmpCv, 0, 0);
 
-  /* draw heatmap */
-  const id = cx.createImageData(W, H), o = id.data;
+  /* red translucent tint ONLY on flagged pixels */
+  const mask = cctx => {
+    const d = cctx.getImageData(0, 0, W, H), o = d.data;
+    for (let p = 0, i = 0; p < r.heatmap.length; p++, i += 4){
+      if (r.contourMask[p]){
+        o[i] = 120; o[i+1] = 40; o[i+2] = 40;         /* dark-red tint */
+        o[i+3] = Math.round(0.45 * 255);
+      }
+    }
+    cctx.putImageData(d, 0, 0);
+  };
+  mask(ox);
+
+  if (showContours){
+    ox.strokeStyle = 'rgba(255,60,60,0.95)';
+    ox.lineWidth = 2;
+    r.regions.slice(0, 20).forEach((reg, idx) => {
+      ox.strokeRect(reg.x, reg.y, reg.w, reg.h);
+      /* numbered badge */
+      ox.fillStyle = 'rgba(200,20,20,0.85)';
+      const bx = reg.x, by = reg.y - 16 > 0 ? reg.y - 16 : reg.y;
+      ox.fillRect(bx, by, 20, 14);
+      ox.fillStyle = '#fff';
+      ox.font = 'bold 10px monospace';
+      ox.textAlign = 'center';
+      ox.fillText(String(idx + 1), bx + 10, by + 11);
+    });
+  }
+  ox.textAlign = 'left';
+  /* caption bar on the original panel */
+  ox.fillStyle = 'rgba(15,19,26,0.85)';
+  ox.fillRect(0, H - 24, W, 24);
+  ox.fillStyle = '#f2b0b0';
+  ox.font = 'bold 11px monospace';
+  ox.fillText('ORIGINAL \u2014 red = edited/tampered area (see content behind)', 8, H - 8);
+
+  /* ---- Panel 2: heatmap view ---- */
+  const hmCv = mkCanvas(W, H), hx = ctx2d(hmCv);
+  /* dimmed original */
+  hx.globalAlpha = 0.45;
+  hx.drawImage(tmpCv, 0, 0);
+  hx.globalAlpha = 1;
+  /* heatmap overlay */
+  const id = hx.createImageData(W, H), o = id.data;
   for (let p = 0, i = 0; p < W*H; p++, i += 4){
     const v = clamp01(r.heatmap[p]);
     const rgb = heatRGB(v);
     o[i] = rgb[0]; o[i+1] = rgb[1]; o[i+2] = rgb[2];
     o[i+3] = v > 0.01 ? Math.round(opacity * 255) : 0;
   }
-  cx.putImageData(id, 0, 0);
+  hx.putImageData(id, 0, 0);
 
-  /* contour outlines */
   if (showContours){
-    cx.strokeStyle = 'rgba(255,80,80,0.8)';
-    cx.lineWidth = 1.5;
-    r.regions.slice(0, 20).forEach((reg, idx) => {
-      cx.strokeRect(reg.x, reg.y, reg.w, reg.h);
-      cx.fillStyle = 'rgba(255,80,80,0.9)';
-      cx.font = 'bold 10px monospace';
-      const lbl = `#${idx+1}`;
-      cx.fillText(lbl, reg.x + 2, reg.y - 3 > 10 ? reg.y - 3 : reg.y + 12);
-    });
+    hx.strokeStyle = 'rgba(255,255,255,0.85)';
+    hx.lineWidth = 1.5;
+    r.regions.slice(0, 20).forEach(reg => hx.strokeRect(reg.x, reg.y, reg.w, reg.h));
   }
+  hx.fillStyle = 'rgba(15,19,26,0.85)';
+  hx.fillRect(0, H - 24, W, 24);
+  hx.fillStyle = '#8ab8e0';
+  hx.font = 'bold 11px monospace';
+  hx.fillText('HEATMAP \u2014 confidence per pixel', 8, H - 8);
 
-  /* legend */
-  const legW = 180, legH = 220;
+  /* ---- Panel 3: legend + stats ---- */
+  const legW = 200, legH = 260;
   const legCv = mkCanvas(legW, legH), legCx = ctx2d(legCv);
-  legCx.fillStyle = 'rgba(15,19,26,0.92)';
+  legCx.fillStyle = 'rgba(15,19,26,0.94)';
   legCx.fillRect(0, 0, legW, legH);
+  legCx.strokeStyle = '#262d38';
+  legCx.strokeRect(.5, .5, legW - 1, legH - 1);
   legCx.fillStyle = '#d7dde6';
-  legCx.font = 'bold 10px monospace';
-  legCx.fillText('TAMPER HEATMAP', 8, 16);
+  legCx.font = 'bold 11px monospace';
+  legCx.fillText('TAMPER DETECTION', 10, 18);
 
-  for (let y = 0; y < 140; y++){
-    const v = 1 - y / 140;
+  for (let y = 0; y < 130; y++){
+    const v = 1 - y / 130;
     const rgb = heatRGB(v);
     legCx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    legCx.fillRect(12, 26 + y, 16, 1);
+    legCx.fillRect(12, 28 + y, 16, 1);
   }
   legCx.fillStyle = '#8a94a3';
   legCx.font = '9px monospace';
-  legCx.fillText('high', 34, 34);
-  legCx.fillText('low', 34, 162);
-  legCx.fillText('safe', 34, 174);
+  legCx.fillText('high', 34, 36);
+  legCx.fillText('low', 34, 152);
+  legCx.fillText('safe', 34, 164);
 
   legCx.fillStyle = '#d7dde6';
   legCx.font = '10px monospace';
-  legCx.fillText(`Flagged: ${r.flaggedPct}%`, 12, 194);
-  legCx.fillText(`Regions: ${r.regions.length}`, 12, 208);
+  legCx.fillText(`Flagged: ${r.flaggedPct}%`, 10, 190);
+  legCx.fillText(`Regions: ${r.regions.length}`, 10, 204);
+  legCx.fillText(`Block: ${blk}px  Sens: ${sens}`, 10, 218);
+  if (showContours) legCx.fillText('Contours: on', 10, 232);
+  legCx.fillStyle = '#8a94a3';
+  legCx.font = '9px monospace';
+  legCx.fillText('blue = likely safe', 12, 250);
 
-  const fullCv = mkCanvas(W + legW + 8, Math.max(H, legH));
-  const fullCx = ctx2d(fullCv);
-  fullCx.drawImage(cv, 0, 0);
-  fullCx.drawImage(legCv, W + 8, 0);
+  /* ---- compose: Original | Heatmap | Legend ---- */
+  const gap = 10;
+  const fullW = W * 2 + gap * 2 + legW;
+  const fullCv = mkCanvas(fullW, H), fullCx = ctx2d(fullCv);
+  fullCx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), W + gap + legW + gap, 0);
+  fullCx.drawImage(origCv, 0, 0);
+  fullCx.drawImage(hmCv, W + gap, 0);
+  fullCx.drawImage(legCv, W * 2 + gap * 2, 0);
 
   const lines = [
     `Block size: ${blk}px \u00b7 Sensitivity: ${sens}`,
@@ -466,6 +518,7 @@ ADV_RENDER.tamper = async function(){
     );
     lines.push('Top suspicious regions:');
     lines.push(...top3);
+    lines.push('Left panel = FULL original with the edited area tinted red \u2014 the underlying content stays visible.');
   }
   lines.push(
     r.flagged
@@ -474,7 +527,17 @@ ADV_RENDER.tamper = async function(){
   );
 
   S.advScoreTamper = r.flaggedPct > 20 ? 0.85 : r.flaggedPct > 10 ? 0.5 : r.flaggedPct > 3 ? 0.25 : 0;
-  finish('tamper', 'Tamper Detection (composite heatmap)', fullCv, lines);
+
+  /* shrink so the side-by-side fits the stage */
+  const maxW = 1200;
+  let outCv = fullCv;
+  if (fullW > maxW){
+    const k = maxW / fullW;
+    outCv = mkCanvas(Math.round(fullW * k), Math.round(H * k));
+    ctx2d(outCv).imageSmoothingEnabled = true;
+    ctx2d(outCv).drawImage(fullCv, 0, 0, outCv.width, outCv.height);
+  }
+  finish('tamper', 'Tamper Detection \u2014 original vs heatmap', outCv, lines);
 };
 
 /* ================= SCORES DASHBOARD ================= */
