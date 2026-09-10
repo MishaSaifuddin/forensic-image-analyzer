@@ -394,27 +394,29 @@ ADV_RENDER.tamper = async function(){
   const W = ds.width, H = ds.height;
 
   /* ---- Panel 1: ORIGINAL with edited areas highlighted ----
-     The untouched original at full brightness. Only the high-confidence
-     regions get a translucent red mask + outlines, so you can still see
-     the real content (the elements) behind the highlighted spots. */
+     The untouched original at full brightness. A SOFT red translucent
+     overlay is composited on top of ONLY the high-confidence regions,
+     so the real content (the elements) stays visible beneath it. */
   const origCv = mkCanvas(W, H), ox = ctx2d(origCv);
   const tmpCv = mkCanvas(W, H);
   const tmpCx = ctx2d(tmpCv);
   tmpCx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), 0, 0);
+
+  /* untouched original first */
   ox.drawImage(tmpCv, 0, 0);
 
-  /* red translucent tint ONLY on flagged pixels */
-  const mask = cctx => {
-    const d = cctx.getImageData(0, 0, W, H), o = d.data;
-    for (let p = 0, i = 0; p < r.heatmap.length; p++, i += 4){
-      if (r.contourMask[p]){
-        o[i] = 120; o[i+1] = 40; o[i+2] = 40;         /* dark-red tint */
-        o[i+3] = Math.round(0.45 * 255);
-      }
+  /* build a separate red overlay for flagged pixels only */
+  const redCv = mkCanvas(W, H), rxCv = ctx2d(redCv);
+  const rd = rxCv.createImageData(W, H), ro = rd.data;
+  for (let p = 0, i = 0; p < r.heatmap.length; p++, i += 4){
+    if (r.contourMask[p]){
+      ro[i] = 235; ro[i+1] = 45; ro[i+2] = 55;
+      ro[i+3] = 110;                            /* ~43% red, rest shows original */
     }
-    cctx.putImageData(d, 0, 0);
-  };
-  mask(ox);
+  }
+  rxCv.putImageData(rd, 0, 0);
+  /* composite red tint OVER the untouched original -> content behind stays visible */
+  ox.drawImage(redCv, 0, 0);
 
   if (showContours){
     ox.strokeStyle = 'rgba(255,60,60,0.95)';
