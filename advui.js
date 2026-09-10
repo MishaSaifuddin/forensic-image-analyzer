@@ -524,7 +524,6 @@ ADV_RENDER.tamper = async function(){
   const gap = 10;
   const fullW = W * 2 + gap * 2 + legW;
   const fullCv = mkCanvas(fullW, H), fullCx = ctx2d(fullCv);
-  fullCx.putImageData(new ImageData(new Uint8ClampedArray(ds.data), W, H), W + gap + legW + gap, 0);
   fullCx.drawImage(origCv, 0, 0);
   fullCx.drawImage(hmCv, W + gap, 0);
   fullCx.drawImage(legCv, W * 2 + gap * 2, 0);

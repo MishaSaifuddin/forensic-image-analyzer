@@ -668,7 +668,10 @@ function tamperDetect(img, opts){
     }
   }
 
-  /* --- 4. Block color statistics anomaly --- */
+  /* --- 4. Block color statistics anomaly ---
+     Compares each block to its NEIGHBORS (local anomaly), so smooth
+     gradients don't trigger false flags everywhere — only blocks that
+     break the surrounding color pattern are flagged. */
   const statMap = new Float32Array(w * h);
   {
     const bw = Math.ceil(w / blk), bh = Math.ceil(h / blk);
@@ -684,63 +687,97 @@ function tamperDetect(img, opts){
         blockMeans.push(c?[rS/c,gS/c,bS/c]:[128,128,128]);
       }
     }
-    const globalR=blockMeans.reduce((a,b)=>a+b[0],0)/blockMeans.length;
-    const globalG=blockMeans.reduce((a,b)=>a+b[1],0)/blockMeans.length;
-    const globalB=blockMeans.reduce((a,b)=>a+b[2],0)/blockMeans.length;
     for (let by=0;by<bh;by++){
       for (let bx=0;bx<bw;bx++){
+        let nSum=0, nCnt=0;
+        for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++){
+          if (!dx && !dy) continue;
+          const ny=by+dy, nx=bx+dx;
+          if (ny>=0 && ny<bh && nx>=0 && nx<bw){
+            const m=blockMeans[ny*bw+nx];
+            nSum += m[0]+m[1]+m[2]; nCnt++;
+          }
+        }
         const m=blockMeans[by*bw+bx];
-        const dr=Math.abs(m[0]-globalR)/255, dg=Math.abs(m[1]-globalG)/255, db=Math.abs(m[2]-globalB)/255;
-        const v=Math.min(1, (dr+dg+db)*3);
+        const nAvg = nCnt ? nSum/nCnt/3 : 128;
+        const d = (Math.abs(m[0]-nAvg) + Math.abs(m[1]-nAvg) + Math.abs(m[2]-nAvg)) / (3*255);
+        const v = Math.min(1, d * 6);
         const y0=by*blk,y1=Math.min(y0+blk,h),x0=bx*blk,x1=Math.min(x0+blk,w);
         for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)statMap[y*w+x]=v;
       }
     }
   }
 
-  /* --- combine signals --- */
+  /* --- combine signals via z-scores ---
+     Each map is converted to a z-score (std-devs above the image's own
+     normal). A soft-max rewards the single strongest signal while the
+     weighted average rewards multi-signal agreement, then a sigmoid
+     turns the score into a 0..1 confidence heatmap. A tampered region
+     stands several std-devs above background -> near-red; calm areas
+     sit near the midpoint and stay clean. */
   const n = w * h;
+  const zOf = arr => {
+    const out = new Float32Array(n);
+    let m = 0;
+    for (let p = 0; p < n; p++) m += arr[p];
+    m /= n;
+    let v = 0;
+    for (let p = 0; p < n; p++) { const d = arr[p] - m; v += d * d; }
+    v = Math.sqrt(v / n) || 1e-6;
+    for (let p = 0; p < n; p++) out[p] = (arr[p] - m) / v;
+    return out;
+  };
+  const elaZ = zOf(elaMap),  noiseZ = zOf(noiseMap),
+        edgeZ = zOf(edgeMap), statZ  = zOf(statMap);
+  const weights = { ela: 0.36, noise: 0.28, edge: 0.18, stat: 0.18 };
+
   const heatmap = new Float32Array(n);
-  const weights = { ela: 0.32, noise: 0.28, edge: 0.24, stat: 0.16 };
-
   for (let p = 0; p < n; p++){
-    heatmap[p] = elaMap[p]*weights.ela + noiseMap[p]*weights.noise
-               + edgeMap[p]*weights.edge + statMap[p]*weights.stat;
+    const wsum = elaZ[p]*weights.ela + noiseZ[p]*weights.noise
+               + edgeZ[p]*weights.edge + statZ[p]*weights.stat;
+    const wmx  = Math.max(elaZ[p], noiseZ[p], edgeZ[p], statZ[p]);
+    const z    = Math.max(-3, Math.min(4, 0.7 * wmx + 0.3 * wsum));
+    heatmap[p] = 1 / (1 + Math.exp(-z * 0.62));  /* sigmoid(0) = 0.5 */
   }
 
-  /* contrast boost: stretch values so real tamper evidence is vivid */
-  let maxH = 0;
-  for (let p = 0; p < n; p++) if (heatmap[p] > maxH) maxH = heatmap[p];
-  if (maxH > 0){
-    const gain = 2.2 / (maxH > 0 ? maxH : 1);
-    for (let p = 0; p < n; p++){
-      let v = heatmap[p] * gain;
-      v = Math.pow(Math.min(1, v), 0.85);      /* gentle gamma keeps low tiers visible */
-      heatmap[p] = v;
+  /* sensitivity thresholding (higher value = stricter) */
+  const threshMap = { low: 0.74, med: 0.64, high: 0.56 };
+  const threshold = threshMap[sensitivity] || 0.64;
+
+  /* light box blur (radius 2) to suppress speckle and edge bands */
+  {
+    const blur = new Float32Array(n);
+    const r = 2, k = (r * 2 + 1) * (r * 2 + 1);
+    for (let y = 0; y < h; y++){
+      const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+      for (let x = 0; x < w; x++){
+        const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
+        let s = 0, c = 0;
+        for (let yy = y0; yy <= y1; yy++)
+          for (let xx = x0; xx <= x1; xx++)
+            { s += heatmap[yy * w + xx]; c++; }
+        blur[y * w + x] = s / c;
+      }
     }
+    heatmap.set(blur);
   }
-
-  /* sensitivity thresholding */
-  const threshMap = { low: 0.55, med: 0.42, high: 0.28 };
-  const threshold = threshMap[sensitivity] || 0.42;
 
   /* contour detection: find connected high-confidence regions */
   const contourMask = new Uint8Array(n);
-  let flaggedCount = 0;
   for (let p = 0; p < n; p++){
     if (heatmap[p] >= threshold){
       contourMask[p] = 1;
-      flaggedCount++;
     }
   }
 
   /* simple blob detection via flood fill */
   const visited = new Uint8Array(n);
   const regions = [];
+  const cleanMask = new Uint8Array(n);
   for (let p = 0; p < n; p++){
     if (!contourMask[p] || visited[p]) continue;
     let minX=w, minY=h, maxX=0, maxY=0, area=0, sumConf=0;
-    const queue = [p];
+    const queue = [p], blob = [];
     visited[p] = 1;
     while (queue.length){
       const cur = queue.shift();
@@ -748,6 +785,7 @@ function tamperDetect(img, opts){
       minX = Math.min(minX, cx); minY = Math.min(minY, cy);
       maxX = Math.max(maxX, cx); maxY = Math.max(maxY, cy);
       area++; sumConf += heatmap[cur];
+      blob.push(cur);
       for (const [ddx,ddy] of [[-1,0],[1,0],[0,-1],[0,1]]){
         const nx=cx+ddx, ny=cy+ddy;
         if (nx<0||nx>=w||ny<0||ny>=h) continue;
@@ -755,7 +793,8 @@ function tamperDetect(img, opts){
         if (contourMask[ni] && !visited[ni]){ visited[ni]=1; queue.push(ni); }
       }
     }
-    if (area >= blk * blk / 4){
+    if (area >= blk * blk / 4 && sumConf / area > threshold + 0.05){
+      for (const bi of blob) cleanMask[bi] = 1;
       regions.push({
         x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1,
         area, avgConf:+(sumConf/area).toFixed(3)
@@ -764,7 +803,10 @@ function tamperDetect(img, opts){
   }
   regions.sort((a,b)=>b.area-a.area);
 
+  /* rebuild the mask from qualifying regions only (specks removed) */
+  let flaggedCount = 0;
+  for (let p = 0; p < n; p++) if (cleanMask[p]) flaggedCount++;
   const flaggedPct = +(flaggedCount/n*100).toFixed(1);
-  return { heatmap, contourMask, regions, flaggedPct,
+  return { heatmap, contourMask: cleanMask, regions, flaggedPct,
            flagged: flaggedPct > 3 };
 }
